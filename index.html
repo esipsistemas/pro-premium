@@ -1,1 +1,263 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Agenda Inteligente WhatsApp | ESIP-Sistemas</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- jsPDF CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+body{margin:0;font-family:Arial,sans-serif;background:#E9F7EF;}
+/* MODAL */
+.modal{
+ position:fixed;inset:0;background:rgba(0,0,0,.4);
+ display:flex;align-items:center;justify-content:center;z-index:9999;
+ visibility:hidden;opacity:0;transition:opacity .3s;
+}
+.modal.active{visibility:visible;opacity:1;}
+.modal-content{
+ background:#fff;padding:30px;border-radius:16px;width:90%;max-width:380px;
+ text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.2);position:relative;
+}
+.modal-content h2{color:#128C7E;margin-bottom:15px;}
+.modal-content input{width:100%;padding:12px;margin-bottom:10px;border-radius:8px;border:1px solid #ccc;}
+.modal-content button{width:100%;padding:14px;background:#25D366;color:#fff;border:none;border-radius:10px;cursor:pointer;}
+.modal-content .warning{color:#e74c3c;font-size:14px;margin-top:10px;}
+.close-modal{position:absolute;top:10px;right:15px;font-size:20px;cursor:pointer;color:#999;}
+header{background:#128C7E;color:#fff;padding:20px;text-align:center;}
+.container{max-width:1000px;margin:30px auto;background:#fff;padding:25px;border-radius:14px;box-shadow:0 8px 25px rgba(0,0,0,.12);}
+h2{text-align:center;color:#128C7E;}
+.form{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:15px;}
+.form input,.form select,.form button{flex:1 1 22%;padding:10px;border-radius:8px;border:1px solid #ccc;}
+.form button{background:#25D366;color:#fff;border:none;cursor:pointer;}
+.btn-foto{background:#128C7E;color:#fff;}
+ul{list-style:none;padding:0;margin:0;}
+li{padding:12px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;}
+.contato{display:flex;gap:10px;align-items:center;}
+.avatar{width:45px;height:45px;border-radius:50%;object-fit:cover;}
+.btn-whatsapp{background:#25D366;color:#fff;border:none;border-radius:6px;padding:6px;margin-right:4px;}
+.btn-editar{background:#3498db;color:#fff;border:none;border-radius:6px;padding:6px;margin-right:4px;}
+.btn-excluir{background:#e74c3c;color:#fff;border:none;border-radius:6px;padding:6px;}
+.tag{padding:3px 6px;border-radius:6px;font-size:12px;color:#fff;}
+.tag.Lead{background:#3498db;}
+.tag.Cliente{background:#2ecc71;}
+.tag.VIP{background:#f1c40f;color:#000;}
+.tag.Cobrança{background:#e74c3c;}
+.painel{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;}
+.card{background:#25D366;color:#fff;padding:18px;border-radius:14px;text-align:center;}
+.warning{color:#e74c3c;font-size:13px;margin-top:4px;}
+</style>
+</head>
+<body>
+
+<!-- MODAL DE LICENÇA -->
+<div class="modal" id="modalLicenca">
+ <div class="modal-content">
+  <span class="close-modal" onclick="closeModal()">&times;</span>
+  <h2>🔐 Ativação</h2>
+  <input id="licencaInput" placeholder="Digite sua licença">
+  <button onclick="validarLicenca()">Ativar</button>
+  <small id="erroLicenca" class="warning"></small>
+ </div>
+</div>
+
+<header>
+<h1>💬 Agenda Inteligente WhatsApp</h1>
+<p>ESIP-Sistemas</p>
+</header>
+
+<div class="container">
+
+<div class="painel">
+ <div class="card">Total<br><b id="total">0</b></div>
+ <div class="card">Leads<br><b id="leads">0</b></div>
+ <div class="card">Clientes<br><b id="clientes">0</b></div>
+ <div class="card">VIP<br><b id="vip">0</b></div>
+</div>
+
+<h2>Adicionar / Editar Contato</h2>
+
+<div class="form">
+ <input id="nome" placeholder="Nome">
+ <input id="telefone" placeholder="Telefone">
+ <input type="file" id="foto" accept="image/*" hidden>
+ <button type="button" class="btn-foto" onclick="foto.click()">📷 Foto</button>
+ <select id="tag">
+  <option>Lead</option>
+  <option>Cliente</option>
+  <option>VIP</option>
+  <option>Cobrança</option>
+ </select>
+ <button onclick="salvarContato()">Salvar</button>
+</div>
+
+<div class="form">
+ <input id="busca" placeholder="🔎 Buscar por nome ou número" oninput="buscar()">
+</div>
+
+<div class="form">
+ <button onclick="exportarPDF()">📄 Exportar PDF</button>
+ <button onclick="restaurar()">♻️ Restaurar</button>
+ <small class="warning">⚠️ Restaurar apagará todos os contatos atuais!</small>
+ <input type="file" id="backupFile" accept=".json" hidden>
+</div>
+
+<ul id="lista"></ul>
+</div>
+
+<script>
+// =================== LICENÇAS ===================
+const LICENCAS_VALIDAS = ["ESIP-2025","ESIP-2026","ESIP-2027","ESIP-2028"];
+const deviceID = localStorage.getItem("deviceID") || Date.now()+"";
+localStorage.setItem("deviceID", deviceID);
+
+const modalLicenca = document.getElementById("modalLicenca");
+function showModal(){ modalLicenca.classList.add("active"); }
+function closeModal(){ modalLicenca.classList.remove("active"); }
+
+function validarLicenca(){
+ const input = licencaInput.value.trim().toUpperCase();
+ if(LICENCAS_VALIDAS.includes(input)){
+  localStorage.setItem("licenca", input);
+  localStorage.setItem("licenca_device", deviceID);
+  closeModal();
+ }else erroLicenca.innerText="Licença inválida";
+}
+
+if(!LICENCAS_VALIDAS.includes(localStorage.getItem("licenca")) ||
+   localStorage.getItem("licenca_device")!==deviceID){
+ showModal();
+}
+
+// =================== CONTATOS ===================
+let contatos = JSON.parse(localStorage.getItem("contatos")) || [];
+let editIndex = null;
+const backupFileInput = document.getElementById("backupFile");
+
+function salvar(){ localStorage.setItem("contatos",JSON.stringify(contatos)); }
+
+function atualizarPainel(){
+ total.innerText = contatos.length;
+ leads.innerText = contatos.filter(c=>c.tag==="Lead").length;
+ clientes.innerText = contatos.filter(c=>c.tag==="Cliente").length;
+ vip.innerText = contatos.filter(c=>c.tag==="VIP").length;
+}
+
+function render(listaFiltrada = contatos){
+ const ul = document.getElementById("lista");
+ ul.innerHTML="";
+ listaFiltrada.forEach((c,i)=>{
+  ul.innerHTML += `
+  <li>
+   <div class="contato">
+    <img src="${c.foto || 'https://via.placeholder.com/45'}" class="avatar">
+    <div>
+     <b>${c.nome}</b><br>${c.telefone}
+     <span class="tag ${c.tag}">${c.tag}</span>
+    </div>
+   </div>
+   <div>
+    <button class="btn-whatsapp" onclick="falar('${c.telefone}','${c.nome}')">💬</button>
+    <button class="btn-editar" onclick="editar(${i})">✏️</button>
+    <button class="btn-excluir" onclick="excluir(${i})">✖</button>
+   </div>
+  </li>`;
+ });
+ atualizarPainel();
+}
+
+function salvarContato(){
+ const file = foto.files[0];
+ const finalizar = (imgUrl)=>{
+  const obj={nome:nome.value,telefone:telefone.value,tag:tag.value,foto:imgUrl};
+  if(editIndex===null) contatos.push(obj);
+  else contatos[editIndex]=obj;
+  salvar(); render();
+  nome.value=""; telefone.value=""; foto.value=""; editIndex=null;
+ };
+ if(file){
+   const url = URL.createObjectURL(file);
+   finalizar(url);
+ }else finalizar(editIndex!==null?contatos[editIndex].foto:"");
+}
+
+function editar(i){
+ const c = contatos[i];
+ nome.value = c.nome; telefone.value = c.telefone; tag.value = c.tag;
+ editIndex = i;
+}
+
+function excluir(i){
+ if(confirm("⚠️ Tem certeza que deseja excluir este contato?")){
+   contatos.splice(i,1);
+   salvar(); render();
+ }
+}
+
+function buscar(){
+ const q = busca.value.toLowerCase();
+ render(contatos.filter(c=>c.nome.toLowerCase().includes(q) || c.telefone.includes(q)));
+}
+
+function falar(n,nome){
+ window.open(`https://wa.me/${n}?text=${encodeURIComponent("Olá "+nome)}`);
+}
+
+// =================== RESTAURAR ===================
+function restaurar(){
+ if(confirm("⚠️ Isto apagará todos os contatos atuais.\nTem certeza que deseja continuar?")){
+   backupFileInput.click();
+ }
+}
+
+backupFileInput.onchange = function(){
+ const r = new FileReader();
+ r.onload = e => {
+   const d = JSON.parse(e.target.result);
+   if(d.device !== deviceID){ alert("Backup não pertence a este dispositivo"); return; }
+   contatos = d.contatos || [];
+   salvar(); render();
+   alert("✅ Contatos restaurados com sucesso!");
+ };
+ r.readAsText(this.files[0]);
+};
+
+// =================== EXPORTAR PDF ===================
+async function exportarPDF(){
+ const { jsPDF } = window.jspdf;
+ const doc = new jsPDF();
+ let y = 20;
+ for(let i=0;i<contatos.length;i++){
+   const c = contatos[i];
+   // Adicionar foto se existir
+   if(c.foto){
+     const img = await loadImage(c.foto);
+     doc.addImage(img,'JPEG',15,y,20,20);
+   }
+   // Adicionar texto
+   doc.text(`Nome: ${c.nome}`,40,y+5);
+   doc.text(`Telefone: ${c.telefone}`,40,y+12);
+   doc.text(`Tag: ${c.tag}`,40,y+19);
+   y+=30;
+   if(y>270){ doc.addPage(); y=20; }
+ }
+ doc.save('agenda.pdf');
+}
+
+function loadImage(url){
+ return new Promise((resolve)=>{
+   const img = new Image();
+   img.crossOrigin = 'anonymous';
+   img.onload = ()=>resolve(img);
+   img.src = url;
+ });
+}
+
+render();
+</script>
+
+</body>
+</html>
 
