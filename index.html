@@ -1,1 +1,246 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📡 ESIP - Leitor QR PRO</title>
+
+<script src="https://unpkg.com/html5-qrcode"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+body{
+    background:#1a0000;
+    color:#fff;
+    font-family:Arial,sans-serif;
+    text-align:center;
+    margin:0;
+    padding-bottom:40px
+}
+#reader{
+    width:340px;
+    margin:20px auto;
+    border:4px solid #ff0000;
+    border-radius:14px
+}
+.btn{
+    background:#ff0000;
+    color:#fff;
+    padding:12px;
+    border:none;
+    border-radius:10px;
+    font-size:16px;
+    width:90%;
+    margin:6px auto
+}
+input{
+    width:90%;
+    padding:12px;
+    border-radius:10px;
+    border:none;
+    font-size:16px;
+    margin-top:8px
+}
+.green{color:#00ff88}
+.red{color:#ff4444}
+.badge{
+    background:#330000;
+    border:1px solid #ff4444;
+    color:#fff;
+    padding:6px 12px;
+    border-radius:30px;
+    margin:4px;
+    display:inline-block;
+    font-size:14px
+}
+.badge.valid{
+    background:#003314;
+    border-color:#00ff88
+}
+.counter-box{
+    background:#330000;
+    border:2px solid #ff0000;
+    padding:6px 10px;
+    border-radius:10px;
+    margin:4px;
+    display:inline-block
+}
+.flash-ok{animation:ok .25s}
+.flash-bad{animation:bad .25s}
+@keyframes ok{0%{background:#00ff8860}100%{background:transparent}}
+@keyframes bad{0%{background:#ff444460}100%{background:transparent}}
+</style>
+</head>
+
+<body>
+
+<h2>📡 ESIP - Leitor QR PRO</h2>
+
+<div>
+    <div class="counter-box">Válidos: <span id="countValid">0</span></div>
+    <div class="counter-box">Usados: <span id="countUsed">0</span></div>
+    <div class="counter-box">Inválidos: <span id="countInvalid">0</span></div>
+    <div class="counter-box">Memória: <span id="countMemory">0</span></div>
+</div>
+
+<div id="reader"></div>
+
+<button class="btn" id="toggleLight">🔦 Lanterna</button>
+<button class="btn" id="switchCam">🔄 Trocar câmera</button>
+
+<input id="searchInput" placeholder="🔍 Buscar por ID">
+<button class="btn" id="searchBtn">🔎 Buscar por ID</button>
+
+<button class="btn" id="export">📤 Exportar CSV</button>
+<button class="btn" id="exportPDF">📄 Exportar PDF</button>
+<button class="btn" id="reset">🗑 Resetar</button>
+
+<div id="msg"></div>
+
+<h3>📜 Histórico</h3>
+<div id="history"></div>
+
+<script>
+/* ===== CONFIG ===== */
+const RESET_PASSWORD="ESIP2025";
+const STORAGE_USED="used_v2";
+const STORAGE_CV="cv";
+const STORAGE_CU="cu";
+const STORAGE_CI="ci";
+
+/* ===== ESTADO ===== */
+let usedMap=JSON.parse(localStorage.getItem(STORAGE_USED)||"{}");
+let totalValid=+localStorage.getItem(STORAGE_CV)||0;
+let totalUsed=+localStorage.getItem(STORAGE_CU)||0;
+let totalInvalid=+localStorage.getItem(STORAGE_CI)||0;
+
+let lastCode="",lastTime=0;
+let html5Qr,cameras=[],cam=0,flashOn=true,scanning=true;
+
+/* ===== UI ===== */
+function updateUI(){
+    countValid.textContent=totalValid;
+    countUsed.textContent=totalUsed;
+    countInvalid.textContent=totalInvalid;
+    countMemory.textContent=Object.keys(usedMap).length;
+}
+function flash(t){
+    document.body.classList.add(t=="ok"?"flash-ok":"flash-bad");
+    setTimeout(()=>document.body.classList.remove("flash-ok","flash-bad"),200);
+}
+function showMsg(t,ok){
+    msg.textContent=t;
+    msg.className=ok?"green":"red";
+}
+
+/* ===== VALIDAÇÃO ===== */
+function validateCode(c){
+    return c.startsWith("INGR-") && c.includes("|ESIP");
+}
+
+/* ===== HISTÓRICO ===== */
+function updateHistory(){
+    history.innerHTML="";
+    Object.entries(usedMap).sort((a,b)=>b[1]-a[1]).forEach(([c,t])=>{
+        const d=document.createElement("div");
+        d.className="badge valid";
+        d.textContent=`✅ ${c} · ${new Date(t).toLocaleString()}`;
+        history.appendChild(d);
+    });
+}
+
+/* ===== QR ===== */
+function processQR(txt){
+    if(!scanning)return;
+    scanning=false;
+
+    const code=txt.trim();
+    const now=Date.now();
+
+    if(code===lastCode && now-lastTime<3000){
+        scanning=true;return;
+    }
+    lastCode=code;lastTime=now;
+
+    if(!validateCode(code)){
+        totalInvalid++;flash("bad");showMsg("❌ QR inválido",false);
+    }else if(!usedMap[code]){
+        usedMap[code]=now;totalValid++;flash("ok");
+        showMsg("✅ Ingresso válido",true);
+    }else{
+        totalUsed++;flash("bad");
+        showMsg("⚠ Já utilizado",false);
+    }
+
+    localStorage.setItem(STORAGE_USED,JSON.stringify(usedMap));
+    localStorage.setItem(STORAGE_CV,totalValid);
+    localStorage.setItem(STORAGE_CU,totalUsed);
+    localStorage.setItem(STORAGE_CI,totalInvalid);
+
+    updateUI();updateHistory();
+    setTimeout(()=>scanning=true,600);
+}
+
+/* ===== BUSCAR ===== */
+searchBtn.onclick=()=>{
+    const c=searchInput.value.trim();
+    if(!c)return showMsg("Digite um código",false);
+    if(usedMap[c]){
+        showMsg(`✅ USADO em ${new Date(usedMap[c]).toLocaleString()}`,true);
+    }else{
+        showMsg("⚠ NÃO utilizado",false);
+    }
+};
+
+/* ===== CAMERA ===== */
+async function start(){
+    html5Qr=new Html5Qrcode("reader");
+    cameras=await Html5Qrcode.getCameras();
+    await html5Qr.start(cameras[cam].id,{fps:10,qrbox:250},processQR);
+}
+switchCam.onclick=async()=>{
+    cam=(cam+1)%cameras.length;
+    await html5Qr.stop();start();
+};
+toggleLight.onclick=async()=>{
+    const t=html5Qr.getRunningTrack();
+    const c=t.getCapabilities();
+    if(!c.torch)return;
+    flashOn=!flashOn;
+    await t.applyConstraints({advanced:[{torch:flashOn}]});
+};
+
+/* ===== EXPORT ===== */
+export.onclick=()=>{
+    let csv="codigo,data\n";
+    for(const c in usedMap)csv+=`${c},${new Date(usedMap[c]).toLocaleString()}\n`;
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+    a.download="ingressos.csv";a.click();
+};
+exportPDF.onclick=()=>{
+    const {jsPDF}=window.jspdf;
+    const d=new jsPDF();let y=10;
+    d.text("Relatório ESIP",10,y);y+=10;
+    d.text(`Válidos: ${totalValid}`,10,y);y+=6;
+    d.text(`Usados: ${totalUsed}`,10,y);y+=6;
+    d.text(`Inválidos: ${totalInvalid}`,10,y);y+=10;
+    for(const c in usedMap){
+        d.text(`${c} - ${new Date(usedMap[c]).toLocaleString()}`,10,y);
+        y+=7;if(y>280){d.addPage();y=10}
+    }
+    d.save("relatorio.pdf");
+};
+
+/* ===== RESET ===== */
+reset.onclick=()=>{
+    if(prompt("Senha")!==RESET_PASSWORD)return;
+    if(!confirm("Apagar tudo?"))return;
+    localStorage.clear();location.reload();
+};
+
+updateUI();updateHistory();start();
+</script>
+</body>
+</html>
 
